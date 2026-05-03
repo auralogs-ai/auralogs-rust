@@ -29,7 +29,7 @@ thiserror = "2"
 tracing = { version = "0.1", optional = true, default-features = false, features = ["std"] }
 tracing-core = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", optional = true, default-features = false, features = ["std", "registry"] }
-ureq = { version = "2.12", optional = true, default-features = false, features = ["json", "tls"] }
+ureq = { version = "3.3", optional = true, default-features = false, features = ["json", "tls"] }
 uuid = { version = "1.18", features = ["v4", "serde"] }
 
 [package.metadata.docs.rs]
