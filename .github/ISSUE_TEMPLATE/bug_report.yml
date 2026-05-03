@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a problem with the Auralog Rust SDK.
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: input
+    id: sdk-version
+    attributes:
+      label: SDK version
+    validations:
+      required: true
+  - type: input
+    id: rust-version
+    attributes:
+      label: Rust version
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true

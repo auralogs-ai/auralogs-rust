@@ -1,0 +1,36 @@
+[package]
+name = "auralog"
+version = "0.1.0-beta.1"
+edition = "2021"
+rust-version = "1.74"
+description = "Auralog Rust SDK beta: application-aware logging and automatic error capture."
+license = "MIT"
+repository = "https://github.com/auralog-ai/auralog-rust"
+homepage = "https://auralog.ai"
+documentation = "https://docs.auralog.ai"
+readme = "README.md"
+keywords = ["logging", "observability", "errors", "tracing", "auralog"]
+categories = ["development-tools::debugging", "api-bindings"]
+
+[features]
+default = ["panic-capture", "ureq-transport"]
+panic-capture = []
+ureq-transport = ["dep:ureq"]
+log = ["dep:log"]
+tracing = ["dep:tracing", "dep:tracing-core", "dep:tracing-subscriber"]
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+log = { version = "0.4", optional = true, features = ["std"] }
+once_cell = "1.21"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = { version = "0.1", optional = true, default-features = false, features = ["std"] }
+tracing-core = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", optional = true, default-features = false, features = ["std", "registry"] }
+ureq = { version = "2.12", optional = true, default-features = false, features = ["json", "tls"] }
+uuid = { version = "1.18", features = ["v4", "serde"] }
+
+[package.metadata.docs.rs]
+all-features = true
