@@ -37,6 +37,7 @@ impl log::Log for AuralogLogLogger {
             record.args().to_string(),
             json!({
                 "source": "rust_log",
+                "rust_log_level": record.level().as_str(),
                 "target": record.target(),
                 "module_path": record.module_path(),
                 "file": record.file(),

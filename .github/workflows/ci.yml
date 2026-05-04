@@ -8,13 +8,17 @@ on:
 
 jobs:
   test:
-    name: Rust stable
+    name: Rust ${{ matrix.toolchain }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, "1.86.0"]
 
     steps:
       - uses: actions/checkout@v5
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@${{ matrix.toolchain }}
         with:
           components: clippy, rustfmt
 

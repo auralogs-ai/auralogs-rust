@@ -18,6 +18,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - run: cargo fmt --check
+
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
       - run: cargo test --all-features
 
       - run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

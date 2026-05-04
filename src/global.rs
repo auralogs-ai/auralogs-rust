@@ -1,8 +1,6 @@
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
-
-pub type MetadataMap = Map<String, Value>;
 
 #[derive(Clone)]
 pub enum GlobalMetadata {

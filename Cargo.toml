@@ -2,14 +2,14 @@
 name = "auralog"
 version = "0.1.0-beta.1"
 edition = "2021"
-rust-version = "1.74"
+rust-version = "1.86"
 description = "Auralog Rust SDK beta: application-aware logging and automatic error capture."
 license = "MIT"
 repository = "https://github.com/auralog-ai/auralog-rust"
 homepage = "https://auralog.ai"
 documentation = "https://docs.auralog.ai"
 readme = "README.md"
-keywords = ["logging", "observability", "errors", "tracing", "auralog"]
+keywords = ["logging", "observability", "error-reporting", "crash-reporting", "auralog"]
 categories = ["development-tools::debugging", "api-bindings"]
 
 [features]

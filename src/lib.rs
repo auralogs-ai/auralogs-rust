@@ -20,7 +20,7 @@ mod transport;
 pub use config::{AuralogConfig, AuralogConfigBuilder};
 pub use entry::{LogEntry, LogLevel};
 pub use error::{AuralogError, Result};
-pub use global::{GlobalMetadata, MetadataMap};
+pub use global::GlobalMetadata;
 #[cfg(feature = "log")]
 pub use log_bridge::{install_log_logger, AuralogLogLogger};
 #[cfg(feature = "tracing")]
@@ -29,7 +29,8 @@ pub use tracing_layer::AuralogLayer;
 use once_cell::sync::OnceCell;
 use serde::Serialize;
 use serde_json::{Map, Value};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
 use transport::Transport;
 use uuid::Uuid;
 
@@ -39,8 +40,10 @@ static GLOBAL: OnceCell<Arc<Auralog>> = OnceCell::new();
 #[derive(Debug)]
 pub struct Auralog {
     environment: String,
-    trace_id: parking_trace_id::TraceId,
-    global_metadata: Option<GlobalMetadata>,
+    trace_id: RwLock<String>,
+    global_metadata: RwLock<Option<GlobalMetadata>>,
+    warned_metadata: Mutex<bool>,
+    shutdown_timeout: Duration,
     transport: Transport,
 }
 
@@ -52,10 +55,13 @@ impl Auralog {
             .clone()
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         let transport = Transport::new(config.transport_config())?;
+        let shutdown_timeout = config.shutdown_timeout;
         let client = Arc::new(Self {
             environment: config.environment,
-            trace_id: parking_trace_id::TraceId(trace_id),
-            global_metadata: config.global_metadata,
+            trace_id: RwLock::new(trace_id),
+            global_metadata: RwLock::new(config.global_metadata),
+            warned_metadata: Mutex::new(false),
+            shutdown_timeout,
             transport,
         });
 
@@ -69,8 +75,14 @@ impl Auralog {
 
     /// Create and install the global client used by module-level logging calls.
     pub fn init(config: AuralogConfig) -> Result<Arc<Self>> {
+        if GLOBAL.get().is_some() {
+            return Err(AuralogError::AlreadyInitialized);
+        }
         let client = Self::new(config)?;
-        let _ = GLOBAL.set(client.clone());
+        if GLOBAL.set(client.clone()).is_err() {
+            client.shutdown();
+            return Err(AuralogError::AlreadyInitialized);
+        }
         Ok(client)
     }
 
@@ -79,8 +91,22 @@ impl Auralog {
         GLOBAL.get().cloned()
     }
 
-    pub fn trace_id(&self) -> &str {
-        &self.trace_id.0
+    pub fn trace_id(&self) -> String {
+        self.trace_id
+            .read()
+            .expect("auralog trace_id poisoned")
+            .clone()
+    }
+
+    pub fn set_trace_id(&self, trace_id: impl Into<String>) {
+        *self.trace_id.write().expect("auralog trace_id poisoned") = trace_id.into();
+    }
+
+    pub fn set_global_metadata(&self, global_metadata: Option<GlobalMetadata>) {
+        *self
+            .global_metadata
+            .write()
+            .expect("auralog global_metadata poisoned") = global_metadata;
     }
 
     pub fn debug<M>(&self, message: impl Into<String>, metadata: M)
@@ -171,7 +197,7 @@ impl Auralog {
             chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             metadata,
             stack_trace,
-            self.trace_id.0.clone(),
+            self.trace_id(),
         );
         self.transport.send(entry);
     }
@@ -181,24 +207,42 @@ impl Auralog {
     }
 
     pub fn shutdown(&self) {
-        self.transport.shutdown();
+        self.transport.shutdown_with_timeout(self.shutdown_timeout);
+    }
+
+    pub fn shutdown_with_timeout(&self, timeout: Duration) {
+        self.transport.shutdown_with_timeout(timeout);
     }
 
     fn merge_metadata<M>(&self, per_call: M, include_global_metadata: bool) -> Option<Value>
     where
         M: Serialize,
     {
+        let global_metadata = self
+            .global_metadata
+            .read()
+            .expect("auralog global_metadata poisoned")
+            .clone();
         let mut out = match include_global_metadata
-            .then(|| self.global_metadata.as_ref().and_then(GlobalMetadata::read))
+            .then(|| global_metadata.as_ref().and_then(GlobalMetadata::read))
             .flatten()
         {
             Some(Value::Object(map)) => map,
             _ => Map::new(),
         };
 
-        if let Ok(Value::Object(map)) = serde_json::to_value(per_call) {
-            for (key, value) in map {
-                out.insert(key, value);
+        match serde_json::to_value(per_call) {
+            Ok(Value::Object(map)) => {
+                for (key, value) in map {
+                    out.insert(key, value);
+                }
+            }
+            Ok(Value::Null) => {}
+            Ok(value) => {
+                out.insert("value".to_string(), value);
+            }
+            Err(err) => {
+                self.warn_metadata_once(&format!("auralog: failed to serialize metadata: {err}"));
             }
         }
 
@@ -206,6 +250,17 @@ impl Auralog {
             None
         } else {
             Some(Value::Object(out))
+        }
+    }
+
+    fn warn_metadata_once(&self, message: &str) {
+        let mut warned = self
+            .warned_metadata
+            .lock()
+            .expect("auralog warned_metadata poisoned");
+        if !*warned {
+            eprintln!("{message}");
+            *warned = true;
         }
     }
 }
@@ -242,7 +297,6 @@ where
     }
 }
 
-mod parking_trace_id {
-    #[derive(Debug)]
-    pub(crate) struct TraceId(pub(crate) String);
+pub mod prelude {
+    pub use crate::{Auralog, AuralogConfig, AuralogConfigBuilder, GlobalMetadata, LogLevel};
 }

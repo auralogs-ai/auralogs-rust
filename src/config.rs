@@ -11,6 +11,8 @@ const DEFAULT_MAX_QUEUE_SIZE: usize = 1000;
 const DEFAULT_MAX_RETRY_ATTEMPTS: usize = 5;
 const DEFAULT_RETRY_INITIAL_DELAY: Duration = Duration::from_secs(1);
 const DEFAULT_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
+const DEFAULT_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub struct AuralogConfig {
@@ -23,6 +25,8 @@ pub struct AuralogConfig {
     pub(crate) max_retry_attempts: usize,
     pub(crate) retry_initial_delay: Duration,
     pub(crate) retry_max_delay: Duration,
+    pub(crate) http_timeout: Duration,
+    pub(crate) shutdown_timeout: Duration,
     pub(crate) trace_id: Option<String>,
     pub(crate) global_metadata: Option<GlobalMetadata>,
     #[cfg(feature = "panic-capture")]
@@ -44,6 +48,7 @@ impl AuralogConfig {
             max_retry_attempts: self.max_retry_attempts,
             retry_initial_delay: self.retry_initial_delay,
             retry_max_delay: self.retry_max_delay,
+            http_timeout: self.http_timeout,
         }
     }
 }
@@ -59,6 +64,8 @@ pub struct AuralogConfigBuilder {
     max_retry_attempts: Option<usize>,
     retry_initial_delay: Option<Duration>,
     retry_max_delay: Option<Duration>,
+    http_timeout: Option<Duration>,
+    shutdown_timeout: Option<Duration>,
     trace_id: Option<String>,
     global_metadata: Option<GlobalMetadata>,
     #[cfg(feature = "panic-capture")]
@@ -111,6 +118,16 @@ impl AuralogConfigBuilder {
         self
     }
 
+    pub fn http_timeout(mut self, value: Duration) -> Self {
+        self.http_timeout = Some(value);
+        self
+    }
+
+    pub fn shutdown_timeout(mut self, value: Duration) -> Self {
+        self.shutdown_timeout = Some(value);
+        self
+    }
+
     pub fn trace_id(mut self, value: impl Into<String>) -> Self {
         self.trace_id = Some(value.into());
         self
@@ -147,24 +164,70 @@ impl AuralogConfigBuilder {
             return Err(AuralogError::MissingEndpoint);
         }
 
+        let flush_interval = self.flush_interval.unwrap_or(DEFAULT_FLUSH_INTERVAL);
+        let max_batch_size = self.max_batch_size.unwrap_or(DEFAULT_MAX_BATCH_SIZE);
+        let max_queue_size = self.max_queue_size.unwrap_or(DEFAULT_MAX_QUEUE_SIZE);
+        let max_retry_attempts = self
+            .max_retry_attempts
+            .unwrap_or(DEFAULT_MAX_RETRY_ATTEMPTS);
+        let retry_initial_delay = self
+            .retry_initial_delay
+            .unwrap_or(DEFAULT_RETRY_INITIAL_DELAY);
+        let retry_max_delay = self.retry_max_delay.unwrap_or(DEFAULT_RETRY_MAX_DELAY);
+        let http_timeout = self.http_timeout.unwrap_or(DEFAULT_HTTP_TIMEOUT);
+        let shutdown_timeout = self.shutdown_timeout.unwrap_or(DEFAULT_SHUTDOWN_TIMEOUT);
+
+        validate_duration("flush_interval", flush_interval)?;
+        validate_duration("retry_initial_delay", retry_initial_delay)?;
+        validate_duration("retry_max_delay", retry_max_delay)?;
+        validate_duration("http_timeout", http_timeout)?;
+        validate_duration("shutdown_timeout", shutdown_timeout)?;
+        if max_batch_size == 0 {
+            return Err(AuralogError::InvalidConfig(
+                "max_batch_size must be greater than zero".to_string(),
+            ));
+        }
+        if max_queue_size == 0 {
+            return Err(AuralogError::InvalidConfig(
+                "max_queue_size must be greater than zero".to_string(),
+            ));
+        }
+        if max_retry_attempts == 0 {
+            return Err(AuralogError::InvalidConfig(
+                "max_retry_attempts must be greater than zero".to_string(),
+            ));
+        }
+        if retry_max_delay < retry_initial_delay {
+            return Err(AuralogError::InvalidConfig(
+                "retry_max_delay must be greater than or equal to retry_initial_delay".to_string(),
+            ));
+        }
+
         Ok(AuralogConfig {
             api_key,
             environment,
             endpoint: endpoint.trim_end_matches('/').to_string(),
-            flush_interval: self.flush_interval.unwrap_or(DEFAULT_FLUSH_INTERVAL),
-            max_batch_size: self.max_batch_size.unwrap_or(DEFAULT_MAX_BATCH_SIZE),
-            max_queue_size: self.max_queue_size.unwrap_or(DEFAULT_MAX_QUEUE_SIZE),
-            max_retry_attempts: self
-                .max_retry_attempts
-                .unwrap_or(DEFAULT_MAX_RETRY_ATTEMPTS),
-            retry_initial_delay: self
-                .retry_initial_delay
-                .unwrap_or(DEFAULT_RETRY_INITIAL_DELAY),
-            retry_max_delay: self.retry_max_delay.unwrap_or(DEFAULT_RETRY_MAX_DELAY),
+            flush_interval,
+            max_batch_size,
+            max_queue_size,
+            max_retry_attempts,
+            retry_initial_delay,
+            retry_max_delay,
+            http_timeout,
+            shutdown_timeout,
             trace_id: self.trace_id,
             global_metadata: self.global_metadata,
             #[cfg(feature = "panic-capture")]
             capture_panics: self.capture_panics.unwrap_or(false),
         })
     }
+}
+
+fn validate_duration(name: &str, value: Duration) -> Result<()> {
+    if value.is_zero() {
+        return Err(AuralogError::InvalidConfig(format!(
+            "{name} must be greater than zero"
+        )));
+    }
+    Ok(())
 }

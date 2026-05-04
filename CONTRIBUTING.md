@@ -14,7 +14,7 @@ Open a bug report and include:
 
 ## Development Setup
 
-Requirements: Rust 1.74 or later.
+Requirements: Rust 1.86 or later.
 
 ```bash
 cargo fmt --check

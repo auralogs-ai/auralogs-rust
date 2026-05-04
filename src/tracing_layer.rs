@@ -1,8 +1,10 @@
 use crate::{Auralog, LogLevel};
 use serde_json::{Map, Value};
 use std::sync::Arc;
+use tracing_core::span::{Attributes, Id, Record};
 use tracing_core::{Event, Subscriber};
 use tracing_subscriber::layer::Context;
+use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 
 pub struct AuralogLayer {
@@ -18,8 +20,33 @@ impl AuralogLayer {
 impl<S> Layer<S> for AuralogLayer
 where
     S: Subscriber,
+    for<'lookup> S: LookupSpan<'lookup>,
 {
-    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
+        let Some(span) = ctx.span(id) else {
+            return;
+        };
+        let mut visitor = JsonVisitor::default();
+        attrs.record(&mut visitor);
+        span.extensions_mut().insert(SpanFields(visitor.fields));
+    }
+
+    fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
+        let Some(span) = ctx.span(id) else {
+            return;
+        };
+        let mut visitor = JsonVisitor::default();
+        values.record(&mut visitor);
+        let mut extensions = span.extensions_mut();
+        let fields = extensions.get_mut::<SpanFields>();
+        if let Some(fields) = fields {
+            fields.0.extend(visitor.fields);
+        } else {
+            extensions.insert(SpanFields(visitor.fields));
+        }
+    }
+
+    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
         let metadata = event.metadata();
         let mut visitor = JsonVisitor::default();
         event.record(&mut visitor);
@@ -54,6 +81,32 @@ where
                 .fields
                 .insert("line".to_string(), Value::Number(line.into()));
         }
+        if let Some(scope) = ctx.event_scope(event) {
+            let spans: Vec<Value> = scope
+                .from_root()
+                .map(|span| {
+                    let metadata = span.metadata();
+                    let fields = span
+                        .extensions()
+                        .get::<SpanFields>()
+                        .map(|fields| Value::Object(fields.0.clone()))
+                        .unwrap_or(Value::Null);
+                    serde_json::json!({
+                        "name": metadata.name(),
+                        "target": metadata.target(),
+                        "module_path": metadata.module_path(),
+                        "file": metadata.file(),
+                        "line": metadata.line(),
+                        "fields": fields
+                    })
+                })
+                .collect();
+            if !spans.is_empty() {
+                visitor
+                    .fields
+                    .insert("spans".to_string(), Value::Array(spans));
+            }
+        }
 
         self.client.log(
             level_from_tracing(*metadata.level()),
@@ -77,6 +130,9 @@ fn level_from_tracing(level: tracing_core::Level) -> LogLevel {
 struct JsonVisitor {
     fields: Map<String, Value>,
 }
+
+#[derive(Clone)]
+struct SpanFields(Map<String, Value>);
 
 impl tracing_core::field::Visit for JsonVisitor {
     fn record_i64(&mut self, field: &tracing_core::field::Field, value: i64) {

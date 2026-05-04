@@ -2,9 +2,15 @@ use crate::entry::LogEntry;
 use crate::error::{AuralogError, Result};
 use serde_json::json;
 use std::collections::VecDeque;
+use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+#[cfg(not(feature = "ureq-transport"))]
+compile_error!(
+    "auralog requires a transport feature. Enable the default `ureq-transport` feature."
+);
 
 #[derive(Debug, Clone)]
 pub(crate) struct TransportConfig {
@@ -16,19 +22,24 @@ pub(crate) struct TransportConfig {
     pub(crate) max_retry_attempts: usize,
     pub(crate) retry_initial_delay: Duration,
     pub(crate) retry_max_delay: Duration,
+    pub(crate) http_timeout: Duration,
 }
 
 #[derive(Debug)]
 pub(crate) struct Transport {
     inner: Arc<Inner>,
     worker: Mutex<Option<JoinHandle<()>>>,
+    worker_done: Mutex<Option<Receiver<()>>>,
 }
 
 #[derive(Debug)]
 struct Inner {
     config: TransportConfig,
+    #[cfg(feature = "ureq-transport")]
+    agent: ureq::Agent,
     state: Mutex<State>,
     wake: Condvar,
+    warned_failure: Mutex<bool>,
 }
 
 #[derive(Debug, Default)]
@@ -58,19 +69,32 @@ impl Transport {
         }
 
         let inner = Arc::new(Inner {
+            #[cfg(feature = "ureq-transport")]
+            agent: ureq::AgentBuilder::new()
+                .timeout_connect(config.http_timeout)
+                .timeout_read(config.http_timeout)
+                .build(),
             config,
             state: Mutex::new(State::default()),
             wake: Condvar::new(),
+            warned_failure: Mutex::new(false),
         });
+        let (done_sender, done_receiver) = mpsc::channel();
+        // The worker only owns `Inner` and never reaches back into `Auralog`,
+        // so starting it here is independent of the outer Arc<Auralog>
+        // construction order.
         let worker_inner = inner.clone();
         let worker = thread::Builder::new()
             .name("auralog-flush".to_string())
-            .spawn(move || worker_inner.run())
-            .map_err(|err| AuralogError::InvalidConfig(err.to_string()))?;
+            .spawn(move || {
+                worker_inner.run();
+                let _ = done_sender.send(());
+            })?;
 
         Ok(Self {
             inner,
             worker: Mutex::new(Some(worker)),
+            worker_done: Mutex::new(Some(done_receiver)),
         })
     }
 
@@ -91,25 +115,37 @@ impl Transport {
     }
 
     pub(crate) fn flush(&self) {
-        self.inner.flush_once();
+        self.inner.flush_until_empty(None);
     }
 
-    pub(crate) fn shutdown(&self) {
+    pub(crate) fn shutdown_with_timeout(&self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
         {
             let mut state = self.inner.state.lock().expect("auralog state poisoned");
             state.stopped = true;
             self.inner.wake.notify_all();
         }
-        if let Some(worker) = self.worker.lock().expect("auralog worker poisoned").take() {
-            let _ = worker.join();
+        if let Some(done) = self
+            .worker_done
+            .lock()
+            .expect("auralog worker_done poisoned")
+            .take()
+        {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let _ = done.recv_timeout(remaining);
         }
-        self.inner.flush_until_empty();
+        if let Some(worker) = self.worker.lock().expect("auralog worker poisoned").take() {
+            if worker.is_finished() {
+                let _ = worker.join();
+            }
+        }
+        self.inner.flush_until_empty(Some(deadline));
     }
 }
 
 impl Drop for Transport {
     fn drop(&mut self) {
-        self.shutdown();
+        self.shutdown_with_timeout(Duration::from_millis(250));
     }
 }
 
@@ -138,8 +174,12 @@ impl Inner {
         }
     }
 
-    fn flush_until_empty(&self) {
+    fn flush_until_empty(&self, deadline: Option<Instant>) {
         loop {
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                self.warn_once("auralog: shutdown/flush timed out with pending logs");
+                break;
+            }
             let has_entries = {
                 let state = self.state.lock().expect("auralog state poisoned");
                 !state.single_queue.is_empty() || !state.batch_queue.is_empty()
@@ -147,7 +187,14 @@ impl Inner {
             if !has_entries {
                 break;
             }
-            self.flush_once();
+            let success = self.flush_once();
+            if !success {
+                let delay = self.config.retry_initial_delay;
+                if deadline.is_some_and(|deadline| Instant::now() + delay > deadline) {
+                    break;
+                }
+                thread::sleep(delay);
+            }
         }
     }
 
@@ -171,15 +218,18 @@ impl Inner {
             }
         };
 
-        let success = self.send_http(&entries, single);
-        if !success {
-            self.requeue(entries, single);
+        let outcome = self.send_http(&entries, single);
+        match outcome {
+            SendOutcome::Success | SendOutcome::PermanentFailure => true,
+            SendOutcome::RetryableFailure => {
+                self.requeue(entries, single);
+                false
+            }
         }
-        success
     }
 
     #[cfg(feature = "ureq-transport")]
-    fn send_http(&self, entries: &[QueuedEntry], single: bool) -> bool {
+    fn send_http(&self, entries: &[QueuedEntry], single: bool) -> SendOutcome {
         let url = if single {
             format!("{}/v1/logs/single", self.config.endpoint)
         } else {
@@ -191,16 +241,40 @@ impl Inner {
             let logs: Vec<_> = entries.iter().map(|entry| &entry.entry).collect();
             json!({"projectApiKey": self.config.api_key, "logs": logs})
         };
-        ureq::post(&url)
+        match self
+            .agent
+            .post(&url)
             .set("Content-Type", "application/json")
             .send_json(body)
-            .map(|response| (200..300).contains(&response.status()))
-            .unwrap_or(false)
-    }
-
-    #[cfg(not(feature = "ureq-transport"))]
-    fn send_http(&self, _entries: &[QueuedEntry], _single: bool) -> bool {
-        true
+        {
+            Ok(response) if (200..300).contains(&response.status()) => SendOutcome::Success,
+            Ok(response) if (400..500).contains(&response.status()) => {
+                self.warn_once(&format!(
+                    "auralog: dropping logs after non-retryable HTTP {} from ingest",
+                    response.status()
+                ));
+                SendOutcome::PermanentFailure
+            }
+            Ok(response) => {
+                self.warn_once(&format!(
+                    "auralog: retrying logs after HTTP {} from ingest",
+                    response.status()
+                ));
+                SendOutcome::RetryableFailure
+            }
+            Err(ureq::Error::Status(status, _)) if (400..500).contains(&status) => {
+                self.warn_once(&format!(
+                    "auralog: dropping logs after non-retryable HTTP {status} from ingest"
+                ));
+                SendOutcome::PermanentFailure
+            }
+            Err(err) => {
+                self.warn_once(&format!(
+                    "auralog: retrying logs after delivery failure: {err}"
+                ));
+                SendOutcome::RetryableFailure
+            }
+        }
     }
 
     fn requeue(&self, entries: Vec<QueuedEntry>, single: bool) {
@@ -209,6 +283,8 @@ impl Inner {
             entry.attempts += 1;
             if entry.attempts < self.config.max_retry_attempts {
                 retryable.push(entry);
+            } else {
+                self.warn_once("auralog: dropping logs after retry attempts exhausted");
             }
         }
         if retryable.is_empty() {
@@ -224,6 +300,21 @@ impl Inner {
             }
         }
     }
+
+    fn warn_once(&self, message: &str) {
+        let mut warned = self.warned_failure.lock().expect("auralog warned poisoned");
+        if !*warned {
+            eprintln!("{message}");
+            *warned = true;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SendOutcome {
+    Success,
+    RetryableFailure,
+    PermanentFailure,
 }
 
 fn trim_for_capacity(state: &mut State, max_queue_size: usize) {

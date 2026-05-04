@@ -10,6 +10,10 @@ pub enum AuralogError {
     MissingEnvironment,
     #[error("endpoint is required")]
     MissingEndpoint,
+    #[error("auralog global client is already initialized")]
+    AlreadyInitialized,
     #[error("invalid config: {0}")]
     InvalidConfig(String),
+    #[error("transport error: {0}")]
+    Transport(#[from] std::io::Error),
 }
