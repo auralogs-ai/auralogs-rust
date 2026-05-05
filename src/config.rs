@@ -68,6 +68,7 @@ pub struct AuralogConfigBuilder {
     shutdown_timeout: Option<Duration>,
     trace_id: Option<String>,
     global_metadata: Option<GlobalMetadata>,
+    allow_insecure_endpoint: Option<bool>,
     #[cfg(feature = "panic-capture")]
     capture_panics: Option<bool>,
 }
@@ -138,6 +139,18 @@ impl AuralogConfigBuilder {
         self
     }
 
+    /// Allow plaintext (non-HTTPS) endpoints. Defaults to `false`.
+    ///
+    /// By default, [`AuralogConfigBuilder::build`] rejects endpoints whose
+    /// scheme is not `https://` so that a misconfigured endpoint cannot
+    /// silently downgrade every POST to plaintext. Set this to `true`
+    /// explicitly when you need to talk to a local development server or
+    /// an internal HTTP-only ingest.
+    pub fn allow_insecure_endpoint(mut self, value: bool) -> Self {
+        self.allow_insecure_endpoint = Some(value);
+        self
+    }
+
     #[cfg(feature = "panic-capture")]
     pub fn capture_panics(mut self, value: bool) -> Self {
         self.capture_panics = Some(value);
@@ -162,6 +175,26 @@ impl AuralogConfigBuilder {
             .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
         if endpoint.trim().is_empty() {
             return Err(AuralogError::MissingEndpoint);
+        }
+
+        let allow_insecure_endpoint = self.allow_insecure_endpoint.unwrap_or(false);
+        // Per RFC 3986 §3.1, URI scheme comparison is case-insensitive.
+        // `HTTPS://example.com` and `https://example.com` denote the same
+        // scheme, so we lowercase before checking. Only the scheme prefix
+        // needs lowercasing, but Rust's `&str::to_lowercase` is allocation-
+        // happy and the endpoint string is short, so we just lowercase the
+        // whole leading slice.
+        let trimmed_endpoint = endpoint.trim_start();
+        let scheme_is_https = trimmed_endpoint
+            .split_once("://")
+            .map(|(scheme, _rest)| scheme.eq_ignore_ascii_case("https"))
+            .unwrap_or(false);
+        if !allow_insecure_endpoint && !scheme_is_https {
+            return Err(AuralogError::InvalidConfig(
+                "endpoint must use https://; pass allow_insecure_endpoint(true) to opt in to \
+                 plaintext"
+                    .to_string(),
+            ));
         }
 
         let flush_interval = self.flush_interval.unwrap_or(DEFAULT_FLUSH_INTERVAL);
