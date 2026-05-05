@@ -178,7 +178,18 @@ impl AuralogConfigBuilder {
         }
 
         let allow_insecure_endpoint = self.allow_insecure_endpoint.unwrap_or(false);
-        if !allow_insecure_endpoint && !endpoint.trim_start().starts_with("https://") {
+        // Per RFC 3986 §3.1, URI scheme comparison is case-insensitive.
+        // `HTTPS://example.com` and `https://example.com` denote the same
+        // scheme, so we lowercase before checking. Only the scheme prefix
+        // needs lowercasing, but Rust's `&str::to_lowercase` is allocation-
+        // happy and the endpoint string is short, so we just lowercase the
+        // whole leading slice.
+        let trimmed_endpoint = endpoint.trim_start();
+        let scheme_is_https = trimmed_endpoint
+            .split_once("://")
+            .map(|(scheme, _rest)| scheme.eq_ignore_ascii_case("https"))
+            .unwrap_or(false);
+        if !allow_insecure_endpoint && !scheme_is_https {
             return Err(AuralogError::InvalidConfig(
                 "endpoint must use https://; pass allow_insecure_endpoint(true) to opt in to \
                  plaintext"

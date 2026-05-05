@@ -335,21 +335,87 @@ fn config_accepts_https_endpoint_without_opt_in() {
     assert!(result.is_ok());
 }
 
+#[test]
+fn config_accepts_uppercase_https_scheme() {
+    // Per RFC 3986 §3.1 URI schemes are case-insensitive. A byte-exact
+    // `starts_with("https://")` check would wrongly reject this.
+    for endpoint in [
+        "HTTPS://ingest.example.com",
+        "Https://ingest.example.com",
+        "hTtPs://ingest.example.com",
+    ] {
+        let result = AuralogConfig::builder()
+            .api_key("k")
+            .endpoint(endpoint)
+            .build();
+        assert!(
+            result.is_ok(),
+            "scheme comparison must be case-insensitive (failed for {endpoint})"
+        );
+    }
+}
+
 /// Verifies that the SDK does not silently follow HTTP redirects. ureq's
 /// default of following up to 5 redirects is suppressed via
-/// `AgentBuilder::redirects(0)` in `transport::Transport::new`. With that
-/// setting, a 30x response is surfaced to the SDK as a non-2xx status —
-/// here, the test server returns a single 301 with a `Location` header
-/// pointing at a path the server will never serve, so if the SDK followed
-/// the redirect it would hang waiting for a second connection. Instead it
-/// classifies 301 as a retryable failure (5xx-ish bucket from the SDK's
-/// perspective) and stops after `max_retry_attempts` without ever opening
-/// a second TCP connection. We assert exactly one inbound request.
+/// `AgentBuilder::redirects(0)` in `transport::Transport::new`. The test
+/// is structured so that, if redirect-following were re-enabled, ureq
+/// would issue a second POST to a *separate* trap listener — and we assert
+/// the trap listener saw zero connections.
+///
+/// Concretely:
+/// 1. Bind a "trap" `TcpListener` on a free port and stash its address.
+///    Spawn a thread that loops on `accept()` and increments a counter for
+///    every inbound TCP connection; the listener is non-blocking so the
+///    thread can be told to exit.
+/// 2. Start the main `TestServer` so it returns a single 301 whose
+///    `Location` header is the *absolute* URL of the trap listener.
+/// 3. Send one log. With `redirects(0)` the SDK surfaces 301 as a failure
+///    and never connects to the trap. Without `redirects(0)` ureq would
+///    follow the 301 and POST to the trap, bumping the counter.
+/// 4. Assert the trap counter is exactly zero.
+///
+/// This invariant is what makes the test non-tautological: removing
+/// `.redirects(0)` from `transport::Transport::new` causes the trap to
+/// receive a connection and the assertion to fail.
 #[test]
 fn redirects_are_not_followed() {
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let trap_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let trap_addr = trap_listener.local_addr().unwrap();
+    trap_listener.set_nonblocking(true).unwrap();
+    let trap_hits = Arc::new(AtomicUsize::new(0));
+    let trap_shutdown = Arc::new(AtomicBool::new(false));
+
+    let trap_hits_thread = Arc::clone(&trap_hits);
+    let trap_shutdown_thread = Arc::clone(&trap_shutdown);
+    let trap_handle = thread::spawn(move || {
+        while !trap_shutdown_thread.load(Ordering::SeqCst) {
+            match trap_listener.accept() {
+                Ok((mut stream, _)) => {
+                    trap_hits_thread.fetch_add(1, Ordering::SeqCst);
+                    // Drain and close so ureq does not hang on the
+                    // followed request — we only care that we were
+                    // contacted at all.
+                    let _ = stream.set_nonblocking(true);
+                    let mut sink = [0_u8; 1024];
+                    let _ = stream.read(&mut sink);
+                    let _ =
+                        stream.write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n");
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
     let server = TestServer::with_statuses_and_extra_headers(vec![(
         301,
-        Some("Location: /elsewhere".to_string()),
+        Some(format!("Location: http://{trap_addr}/elsewhere")),
     )]);
     let client = Auralog::new(
         AuralogConfig::builder()
@@ -371,7 +437,20 @@ fn redirects_are_not_followed() {
     assert_eq!(
         requests.len(),
         1,
-        "SDK must not open a second connection following a redirect"
+        "primary endpoint must be hit exactly once"
+    );
+
+    // Give a generous window for any (incorrectly) followed request to
+    // hit the trap before we tear it down. 250ms is well past the SDK's
+    // 1ms retry backoff configured above.
+    thread::sleep(Duration::from_millis(250));
+    let observed_hits = trap_hits.load(Ordering::SeqCst);
+    trap_shutdown.store(true, Ordering::SeqCst);
+    trap_handle.join().unwrap();
+
+    assert_eq!(
+        observed_hits, 0,
+        "SDK must not follow 30x Location to a different host/port"
     );
 }
 
