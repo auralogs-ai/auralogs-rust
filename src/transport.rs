@@ -70,7 +70,13 @@ impl Transport {
 
         let inner = Arc::new(Inner {
             #[cfg(feature = "ureq-transport")]
+            // Disable redirect following: ureq 2.x defaults to up to 5
+            // redirects. While 30x responses are downgraded to GET with no
+            // body (so projectApiKey is not replayed), the redirected URL
+            // still leaks via the Host header and a malicious server can
+            // force redirects for SSRF reconnaissance. Refuse outright.
             agent: ureq::AgentBuilder::new()
+                .redirects(0)
                 .timeout_connect(config.http_timeout)
                 .timeout_read(config.http_timeout)
                 .build(),

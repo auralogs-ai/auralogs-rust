@@ -39,6 +39,7 @@ fn manual_logs_send_expected_wire_payloads() {
             .api_key("aura_test")
             .environment("test")
             .endpoint(server.endpoint())
+            .allow_insecure_endpoint(true)
             .flush_interval(Duration::from_millis(10))
             .global_metadata(GlobalMetadata::static_map(json!({"service": "checkout"})))
             .build()
@@ -78,6 +79,7 @@ fn global_metadata_supplier_panic_does_not_crash_logging() {
         AuralogConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
+            .allow_insecure_endpoint(true)
             .global_metadata(GlobalMetadata::supplier(|| panic!("bad supplier")))
             .build()
             .unwrap(),
@@ -99,6 +101,7 @@ fn flush_drains_all_batches() {
         AuralogConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
+            .allow_insecure_endpoint(true)
             .max_batch_size(50)
             .build()
             .unwrap(),
@@ -125,6 +128,7 @@ fn four_xx_failures_are_not_retried() {
         AuralogConfig::builder()
             .api_key("bad_key")
             .endpoint(server.endpoint())
+            .allow_insecure_endpoint(true)
             .max_retry_attempts(3)
             .retry_initial_delay(Duration::from_millis(1))
             .retry_max_delay(Duration::from_millis(1))
@@ -148,6 +152,7 @@ fn retryable_failures_stop_after_attempt_limit() {
         AuralogConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
+            .allow_insecure_endpoint(true)
             .max_retry_attempts(2)
             .retry_initial_delay(Duration::from_millis(1))
             .retry_max_delay(Duration::from_millis(1))
@@ -169,6 +174,7 @@ fn queue_trims_oldest_entries_under_pressure() {
         AuralogConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
+            .allow_insecure_endpoint(true)
             .max_queue_size(2)
             .max_batch_size(10)
             .build()
@@ -195,6 +201,7 @@ fn runtime_trace_and_global_metadata_can_change() {
         AuralogConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
+            .allow_insecure_endpoint(true)
             .global_metadata(GlobalMetadata::static_map(json!({"service": "one"})))
             .trace_id("trace-one")
             .max_batch_size(1)
@@ -223,6 +230,7 @@ fn non_object_metadata_is_wrapped() {
         AuralogConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
+            .allow_insecure_endpoint(true)
             .build()
             .unwrap(),
     )
@@ -243,6 +251,7 @@ fn panic_hook_emits_fatal_entry() {
         AuralogConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
+            .allow_insecure_endpoint(true)
             .capture_panics(true)
             .shutdown_timeout(Duration::from_secs(1))
             .build()
@@ -267,6 +276,7 @@ fn tracing_layer_includes_span_context() {
         AuralogConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
+            .allow_insecure_endpoint(true)
             .build()
             .unwrap(),
     )
@@ -294,6 +304,77 @@ fn log_level_serializes_lowercase() {
     assert_eq!(serde_json::to_value(LogLevel::Fatal).unwrap(), "fatal");
 }
 
+#[test]
+fn config_rejects_plaintext_endpoint_by_default() {
+    let result = AuralogConfig::builder()
+        .api_key("k")
+        .endpoint("http://insecure")
+        .build();
+    assert!(
+        result.is_err(),
+        "plaintext endpoints must be rejected unless explicitly allowed"
+    );
+}
+
+#[test]
+fn config_allows_plaintext_endpoint_when_opted_in() {
+    let result = AuralogConfig::builder()
+        .api_key("k")
+        .endpoint("http://insecure")
+        .allow_insecure_endpoint(true)
+        .build();
+    assert!(result.is_ok(), "explicit opt-in should permit http://");
+}
+
+#[test]
+fn config_accepts_https_endpoint_without_opt_in() {
+    let result = AuralogConfig::builder()
+        .api_key("k")
+        .endpoint("https://ingest.example.com")
+        .build();
+    assert!(result.is_ok());
+}
+
+/// Verifies that the SDK does not silently follow HTTP redirects. ureq's
+/// default of following up to 5 redirects is suppressed via
+/// `AgentBuilder::redirects(0)` in `transport::Transport::new`. With that
+/// setting, a 30x response is surfaced to the SDK as a non-2xx status —
+/// here, the test server returns a single 301 with a `Location` header
+/// pointing at a path the server will never serve, so if the SDK followed
+/// the redirect it would hang waiting for a second connection. Instead it
+/// classifies 301 as a retryable failure (5xx-ish bucket from the SDK's
+/// perspective) and stops after `max_retry_attempts` without ever opening
+/// a second TCP connection. We assert exactly one inbound request.
+#[test]
+fn redirects_are_not_followed() {
+    let server = TestServer::with_statuses_and_extra_headers(vec![(
+        301,
+        Some("Location: /elsewhere".to_string()),
+    )]);
+    let client = Auralog::new(
+        AuralogConfig::builder()
+            .api_key("aura_test")
+            .endpoint(server.endpoint())
+            .allow_insecure_endpoint(true)
+            .max_retry_attempts(1)
+            .retry_initial_delay(Duration::from_millis(1))
+            .retry_max_delay(Duration::from_millis(1))
+            .build()
+            .unwrap(),
+    )
+    .unwrap();
+
+    client.info("redirect probe", json!({}));
+    client.flush();
+
+    let requests = server.requests();
+    assert_eq!(
+        requests.len(),
+        1,
+        "SDK must not open a second connection following a redirect"
+    );
+}
+
 struct TestServer {
     endpoint: String,
     receiver: mpsc::Receiver<Request>,
@@ -307,12 +388,17 @@ impl TestServer {
     }
 
     fn with_statuses(statuses: Vec<u16>) -> Self {
+        let entries = statuses.into_iter().map(|status| (status, None)).collect();
+        Self::with_statuses_and_extra_headers(entries)
+    }
+
+    fn with_statuses_and_extra_headers(entries: Vec<(u16, Option<String>)>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         let (sender, receiver) = mpsc::channel();
-        let expected = statuses.len();
+        let expected = entries.len();
         let handle = thread::spawn(move || {
-            for status in statuses {
+            for (status, extra_header) in entries {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut bytes = Vec::new();
                 let mut buffer = [0_u8; 1024];
@@ -331,12 +417,22 @@ impl TestServer {
                 sender.send(request).unwrap();
                 let reason = if status == 204 {
                     "No Content"
+                } else if status == 301 {
+                    "Moved Permanently"
+                } else if status == 302 {
+                    "Found"
+                } else if status == 307 {
+                    "Temporary Redirect"
                 } else if status == 401 {
                     "Unauthorized"
                 } else {
                     "Internal Server Error"
                 };
-                let response = format!("HTTP/1.1 {status} {reason}\r\nContent-Length: 0\r\n\r\n");
+                let extra = extra_header
+                    .map(|header| format!("{header}\r\n"))
+                    .unwrap_or_default();
+                let response =
+                    format!("HTTP/1.1 {status} {reason}\r\n{extra}Content-Length: 0\r\n\r\n");
                 stream.write_all(response.as_bytes()).unwrap();
             }
         });

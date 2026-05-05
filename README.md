@@ -43,7 +43,8 @@ The `prelude` exports `Auralog`, `AuralogConfig`, `AuralogConfigBuilder`, `Globa
 |---|---|---|---|
 | `api_key` | `String` | _required_ | Your Auralog project API key |
 | `environment` | `String` | `"production"` | e.g. `"production"`, `"staging"`, `"dev"` |
-| `endpoint` | `String` | `https://ingest.auralog.ai` | Ingest endpoint override |
+| `endpoint` | `String` | `https://ingest.auralog.ai` | Ingest endpoint override. Must be `https://` unless `allow_insecure_endpoint(true)` is set |
+| `allow_insecure_endpoint` | `bool` | `false` | Permit non-HTTPS (`http://`) endpoints. Off by default so a misconfigured endpoint cannot silently downgrade every POST to plaintext. Only enable for local development or trusted internal HTTP-only ingest |
 | `flush_interval` | `Duration` | `5s` | Time between batched flushes |
 | `max_batch_size` | `usize` | `50` | Maximum logs per batch request |
 | `max_queue_size` | `usize` | `1000` | Maximum in-memory logs retained before dropping oldest entries |
