@@ -1,8 +1,21 @@
 # Changelog
 
-All notable changes to `auralog` are documented here. Format follows
+All notable changes to `auralogs` are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.0.0] - 2026-05-15
+
+### Changed
+
+- **BREAKING: Renamed crate** `auralog` → `auralogs`. Update Cargo.toml:
+  ```diff
+  - auralog = "0.1.0-beta.1"
+  + auralogs = "1.0.0"
+  ```
+- Module path renamed `use auralog::...` → `use auralogs::...`.
+- Default ingest endpoint updated `https://ingest.auralog.ai` → `https://ingest.auralogs.ai`.
+- Repository moved to https://github.com/auralogs-ai/auralogs-rust.
 
 ## [0.1.0-beta.1] - 2026-05-03
 

@@ -1,6 +1,6 @@
-# Contributing to auralog-rust
+# Contributing to auralogs-rust
 
-This repo is the **Rust SDK** only. For issues with the Auralog service itself, head to [auralog.ai](https://auralog.ai) or [docs.auralog.ai](https://docs.auralog.ai).
+This repo is the **Rust SDK** only. For issues with the Auralogs service itself, head to [auralogs.ai](https://auralogs.ai) or [docs.auralogs.ai](https://docs.auralogs.ai).
 
 ## Reporting Bugs
 

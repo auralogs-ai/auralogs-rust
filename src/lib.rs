@@ -1,4 +1,4 @@
-//! Auralog Rust SDK beta.
+//! Auralogs Rust SDK beta.
 //!
 //! The core API is synchronous and runtime-agnostic. Network delivery happens
 //! on a dedicated background thread so callers can use the SDK from CLI apps,
@@ -17,14 +17,14 @@ mod panic_capture;
 mod tracing_layer;
 mod transport;
 
-pub use config::{AuralogConfig, AuralogConfigBuilder};
+pub use config::{AuralogsConfig, AuralogsConfigBuilder};
 pub use entry::{LogEntry, LogLevel};
-pub use error::{AuralogError, Result};
+pub use error::{AuralogsError, Result};
 pub use global::GlobalMetadata;
 #[cfg(feature = "log")]
-pub use log_bridge::{install_log_logger, AuralogLogLogger};
+pub use log_bridge::{install_log_logger, AuralogsLogLogger};
 #[cfg(feature = "tracing")]
-pub use tracing_layer::AuralogLayer;
+pub use tracing_layer::AuralogsLayer;
 
 use once_cell::sync::OnceCell;
 use serde::Serialize;
@@ -34,11 +34,11 @@ use std::time::Duration;
 use transport::Transport;
 use uuid::Uuid;
 
-static GLOBAL: OnceCell<Arc<Auralog>> = OnceCell::new();
+static GLOBAL: OnceCell<Arc<Auralogs>> = OnceCell::new();
 
-/// Thread-safe Auralog client.
+/// Thread-safe Auralogs client.
 #[derive(Debug)]
-pub struct Auralog {
+pub struct Auralogs {
     environment: String,
     trace_id: RwLock<String>,
     global_metadata: RwLock<Option<GlobalMetadata>>,
@@ -47,9 +47,9 @@ pub struct Auralog {
     transport: Transport,
 }
 
-impl Auralog {
+impl Auralogs {
     /// Create a client without installing it as the global singleton.
-    pub fn new(config: AuralogConfig) -> Result<Arc<Self>> {
+    pub fn new(config: AuralogsConfig) -> Result<Arc<Self>> {
         let trace_id = config
             .trace_id
             .clone()
@@ -74,14 +74,14 @@ impl Auralog {
     }
 
     /// Create and install the global client used by module-level logging calls.
-    pub fn init(config: AuralogConfig) -> Result<Arc<Self>> {
+    pub fn init(config: AuralogsConfig) -> Result<Arc<Self>> {
         if GLOBAL.get().is_some() {
-            return Err(AuralogError::AlreadyInitialized);
+            return Err(AuralogsError::AlreadyInitialized);
         }
         let client = Self::new(config)?;
         if GLOBAL.set(client.clone()).is_err() {
             client.shutdown();
-            return Err(AuralogError::AlreadyInitialized);
+            return Err(AuralogsError::AlreadyInitialized);
         }
         Ok(client)
     }
@@ -94,19 +94,19 @@ impl Auralog {
     pub fn trace_id(&self) -> String {
         self.trace_id
             .read()
-            .expect("auralog trace_id poisoned")
+            .expect("auralogs trace_id poisoned")
             .clone()
     }
 
     pub fn set_trace_id(&self, trace_id: impl Into<String>) {
-        *self.trace_id.write().expect("auralog trace_id poisoned") = trace_id.into();
+        *self.trace_id.write().expect("auralogs trace_id poisoned") = trace_id.into();
     }
 
     pub fn set_global_metadata(&self, global_metadata: Option<GlobalMetadata>) {
         *self
             .global_metadata
             .write()
-            .expect("auralog global_metadata poisoned") = global_metadata;
+            .expect("auralogs global_metadata poisoned") = global_metadata;
     }
 
     pub fn debug<M>(&self, message: impl Into<String>, metadata: M)
@@ -221,7 +221,7 @@ impl Auralog {
         let global_metadata = self
             .global_metadata
             .read()
-            .expect("auralog global_metadata poisoned")
+            .expect("auralogs global_metadata poisoned")
             .clone();
         let mut out = match include_global_metadata
             .then(|| global_metadata.as_ref().and_then(GlobalMetadata::read))
@@ -242,7 +242,7 @@ impl Auralog {
                 out.insert("value".to_string(), value);
             }
             Err(err) => {
-                self.warn_metadata_once(&format!("auralog: failed to serialize metadata: {err}"));
+                self.warn_metadata_once(&format!("auralogs: failed to serialize metadata: {err}"));
             }
         }
 
@@ -257,7 +257,7 @@ impl Auralog {
         let mut warned = self
             .warned_metadata
             .lock()
-            .expect("auralog warned_metadata poisoned");
+            .expect("auralogs warned_metadata poisoned");
         if !*warned {
             eprintln!("{message}");
             *warned = true;
@@ -265,16 +265,16 @@ impl Auralog {
     }
 }
 
-pub fn init(config: AuralogConfig) -> Result<Arc<Auralog>> {
-    Auralog::init(config)
+pub fn init(config: AuralogsConfig) -> Result<Arc<Auralogs>> {
+    Auralogs::init(config)
 }
 
-pub fn global() -> Option<Arc<Auralog>> {
-    Auralog::global()
+pub fn global() -> Option<Arc<Auralogs>> {
+    Auralogs::global()
 }
 
 pub fn shutdown() {
-    if let Some(client) = Auralog::global() {
+    if let Some(client) = Auralogs::global() {
         client.shutdown();
     }
 }
@@ -283,7 +283,7 @@ pub fn info<M>(message: impl Into<String>, metadata: M)
 where
     M: Serialize,
 {
-    if let Some(client) = Auralog::global() {
+    if let Some(client) = Auralogs::global() {
         client.info(message, metadata);
     }
 }
@@ -292,11 +292,11 @@ pub fn error<M>(message: impl Into<String>, metadata: M)
 where
     M: Serialize,
 {
-    if let Some(client) = Auralog::global() {
+    if let Some(client) = Auralogs::global() {
         client.error(message, metadata);
     }
 }
 
 pub mod prelude {
-    pub use crate::{Auralog, AuralogConfig, AuralogConfigBuilder, GlobalMetadata, LogLevel};
+    pub use crate::{Auralogs, AuralogsConfig, AuralogsConfigBuilder, GlobalMetadata, LogLevel};
 }

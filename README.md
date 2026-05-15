@@ -1,8 +1,8 @@
-# auralog-rust (Beta)
+# auralogs-rust (Beta)
 
-Rust SDK for [Auralog](https://auralog.ai) — agentic logging and application awareness.
+Rust SDK for [Auralogs](https://auralogs.ai) — agentic logging and application awareness.
 
-Auralog uses Claude as an on-call engineer: it monitors your logs and errors, alerts you when something's wrong, and opens fix PRs automatically.
+Auralogs uses Claude as an on-call engineer: it monitors your logs and errors, alerts you when something's wrong, and opens fix PRs automatically.
 
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
@@ -10,7 +10,7 @@ Auralog uses Claude as an on-call engineer: it monitors your logs and errors, al
 
 ```toml
 [dependencies]
-auralog = "0.1.0-beta.1"
+auralogs = "0.1.0-beta.1"
 serde_json = "1"
 ```
 
@@ -19,11 +19,11 @@ The beta targets Rust 1.86+.
 ## Quick Start
 
 ```rust
-use auralog::prelude::*;
+use auralogs::prelude::*;
 use serde_json::json;
 
-let client = Auralog::init(
-    AuralogConfig::builder()
+let client = Auralogs::init(
+    AuralogsConfig::builder()
         .api_key(std::env::var("AURALOG_API_KEY")?)
         .environment("production")
         .build()?,
@@ -35,15 +35,15 @@ client.shutdown();
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-The `prelude` exports `Auralog`, `AuralogConfig`, `AuralogConfigBuilder`, `GlobalMetadata`, and `LogLevel`.
+The `prelude` exports `Auralogs`, `AuralogsConfig`, `AuralogsConfigBuilder`, `GlobalMetadata`, and `LogLevel`.
 
 ## Configuration
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `api_key` | `String` | _required_ | Your Auralog project API key |
+| `api_key` | `String` | _required_ | Your Auralogs project API key |
 | `environment` | `String` | `"production"` | e.g. `"production"`, `"staging"`, `"dev"` |
-| `endpoint` | `String` | `https://ingest.auralog.ai` | Ingest endpoint override. Must be `https://` unless `allow_insecure_endpoint(true)` is set |
+| `endpoint` | `String` | `https://ingest.auralogs.ai` | Ingest endpoint override. Must be `https://` unless `allow_insecure_endpoint(true)` is set |
 | `allow_insecure_endpoint` | `bool` | `false` | Permit non-HTTPS (`http://`) endpoints. Off by default so a misconfigured endpoint cannot silently downgrade every POST to plaintext. Only enable for local development or trusted internal HTTP-only ingest |
 | `flush_interval` | `Duration` | `5s` | Time between batched flushes |
 | `max_batch_size` | `usize` | `50` | Maximum logs per batch request |
@@ -62,10 +62,10 @@ The `prelude` exports `Auralog`, `AuralogConfig`, `AuralogConfigBuilder`, `Globa
 Use `GlobalMetadata` to attach session-scoped fields to every log:
 
 ```rust
-use auralog::GlobalMetadata;
+use auralogs::GlobalMetadata;
 use serde_json::json;
 
-let config = AuralogConfig::builder()
+let config = AuralogsConfig::builder()
     .api_key("aura_your_key")
     .global_metadata(GlobalMetadata::supplier(|| {
         json!({ "service": "checkout" })
@@ -91,13 +91,13 @@ client.set_global_metadata(Some(GlobalMetadata::static_map(json!({
 Panic capture is opt-in during beta:
 
 ```rust
-let config = AuralogConfig::builder()
+let config = AuralogsConfig::builder()
     .api_key("aura_your_key")
     .capture_panics(true)
     .build()?;
 ```
 
-Rust panic hooks run even for panics that are later caught with `catch_unwind`, so enabling panic capture can report caught panics as well as process-ending panics. The hook chains to the previous hook after enqueueing a fatal Auralog event.
+Rust panic hooks run even for panics that are later caught with `catch_unwind`, so enabling panic capture can report caught panics as well as process-ending panics. The hook chains to the previous hook after enqueueing a fatal Auralogs event.
 
 Panic capture intentionally bypasses `global_metadata` suppliers. Panic hooks should avoid running user closures while the process may already be unwinding; the emitted event still includes panic metadata such as source, thread, and location.
 
@@ -118,34 +118,34 @@ The default crate features include `ureq-transport`. Building without a transpor
 Enable the `log` feature:
 
 ```toml
-auralog = { version = "0.1.0-beta.1", features = ["log"] }
+auralogs = { version = "0.1.0-beta.1", features = ["log"] }
 ```
 
 ```rust
-let client = Auralog::init(config)?;
-auralog::install_log_logger(client, log::LevelFilter::Info)?;
+let client = Auralogs::init(config)?;
+auralogs::install_log_logger(client, log::LevelFilter::Info)?;
 log::info!("payment processed");
 ```
 
 Rust allows only one global `log` logger. If your app already installs `env_logger`, `tracing_log`, or another logger, `install_log_logger` will return `SetLoggerError`.
 
-`log::Level::Trace` is sent to Auralog as `debug` because Auralog's cross-SDK wire levels are `debug`, `info`, `warn`, `error`, and `fatal`. The original Rust level is preserved in metadata as `rust_log_level`.
+`log::Level::Trace` is sent to Auralogs as `debug` because Auralogs's cross-SDK wire levels are `debug`, `info`, `warn`, `error`, and `fatal`. The original Rust level is preserved in metadata as `rust_log_level`.
 
 ## `tracing` Integration
 
 Enable the `tracing` feature:
 
 ```toml
-auralog = { version = "0.1.0-beta.1", features = ["tracing"] }
+auralogs = { version = "0.1.0-beta.1", features = ["tracing"] }
 ```
 
-Use `AuralogLayer` with your subscriber stack:
+Use `AuralogsLayer` with your subscriber stack:
 
 ```rust
 use tracing_subscriber::prelude::*;
 
-let client = Auralog::init(config)?;
-let subscriber = tracing_subscriber::registry().with(auralog::AuralogLayer::new(client));
+let client = Auralogs::init(config)?;
+let subscriber = tracing_subscriber::registry().with(auralogs::AuralogsLayer::new(client));
 tracing::subscriber::set_global_default(subscriber)?;
 ```
 
@@ -155,7 +155,7 @@ Events include the active tracing span chain in `metadata.spans`, including span
 
 ## Graceful Shutdown
 
-The transport runs on a named background thread (`auralog-flush`). `Arc<Auralog>` values may be retained by the global singleton or panic hook, so dropping a handle is not a deterministic flush mechanism. Call `shutdown()` for deterministic flush in CLIs, tests, and serverless handlers:
+The transport runs on a named background thread (`auralogs-flush`). `Arc<Auralogs>` values may be retained by the global singleton or panic hook, so dropping a handle is not a deterministic flush mechanism. Call `shutdown()` for deterministic flush in CLIs, tests, and serverless handlers:
 
 ```rust
 client.shutdown();
@@ -173,7 +173,7 @@ The release workflow expects `secrets.CARGO_REGISTRY_TOKEN` until crates.io trus
 
 ## Documentation
 
-Full docs at [docs.auralog.ai](https://docs.auralog.ai).
+Full docs at [docs.auralogs.ai](https://docs.auralogs.ai).
 
 ## Security
 

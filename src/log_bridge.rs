@@ -1,14 +1,14 @@
-use crate::{Auralog, LogLevel};
+use crate::{Auralogs, LogLevel};
 use serde_json::json;
 use std::sync::Arc;
 
-pub struct AuralogLogLogger {
-    client: Arc<Auralog>,
+pub struct AuralogsLogLogger {
+    client: Arc<Auralogs>,
     level_filter: log::LevelFilter,
 }
 
-impl AuralogLogLogger {
-    pub fn new(client: Arc<Auralog>, level_filter: log::LevelFilter) -> Self {
+impl AuralogsLogLogger {
+    pub fn new(client: Arc<Auralogs>, level_filter: log::LevelFilter) -> Self {
         Self {
             client,
             level_filter,
@@ -16,7 +16,7 @@ impl AuralogLogLogger {
     }
 }
 
-impl log::Log for AuralogLogLogger {
+impl log::Log for AuralogsLogLogger {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
         metadata.level() <= self.level_filter
     }
@@ -53,10 +53,10 @@ impl log::Log for AuralogLogLogger {
 }
 
 pub fn install_log_logger(
-    client: Arc<Auralog>,
+    client: Arc<Auralogs>,
     level_filter: log::LevelFilter,
 ) -> std::result::Result<(), log::SetLoggerError> {
-    log::set_boxed_logger(Box::new(AuralogLogLogger::new(client, level_filter)))?;
+    log::set_boxed_logger(Box::new(AuralogsLogLogger::new(client, level_filter)))?;
     log::set_max_level(level_filter);
     Ok(())
 }

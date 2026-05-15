@@ -1,4 +1,4 @@
-use crate::{Auralog, LogLevel};
+use crate::{Auralogs, LogLevel};
 use serde_json::{Map, Value};
 use std::sync::Arc;
 use tracing_core::span::{Attributes, Id, Record};
@@ -7,17 +7,17 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 
-pub struct AuralogLayer {
-    client: Arc<Auralog>,
+pub struct AuralogsLayer {
+    client: Arc<Auralogs>,
 }
 
-impl AuralogLayer {
-    pub fn new(client: Arc<Auralog>) -> Self {
+impl AuralogsLayer {
+    pub fn new(client: Arc<Auralogs>) -> Self {
         Self { client }
     }
 }
 
-impl<S> Layer<S> for AuralogLayer
+impl<S> Layer<S> for AuralogsLayer
 where
     S: Subscriber,
     for<'lookup> S: LookupSpan<'lookup>,

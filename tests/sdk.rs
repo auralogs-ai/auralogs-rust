@@ -1,4 +1,4 @@
-use auralog::{Auralog, AuralogConfig, GlobalMetadata, LogLevel};
+use auralogs::{Auralogs, AuralogsConfig, GlobalMetadata, LogLevel};
 use serde_json::json;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -13,17 +13,17 @@ static PANIC_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn config_requires_api_key() {
-    assert!(AuralogConfig::builder().build().is_err());
+    assert!(AuralogsConfig::builder().build().is_err());
 }
 
 #[test]
 fn config_rejects_zero_durations_and_bad_retry_order() {
-    assert!(AuralogConfig::builder()
+    assert!(AuralogsConfig::builder()
         .api_key("aura_test")
         .flush_interval(Duration::ZERO)
         .build()
         .is_err());
-    assert!(AuralogConfig::builder()
+    assert!(AuralogsConfig::builder()
         .api_key("aura_test")
         .retry_initial_delay(Duration::from_secs(2))
         .retry_max_delay(Duration::from_secs(1))
@@ -34,8 +34,8 @@ fn config_rejects_zero_durations_and_bad_retry_order() {
 #[test]
 fn manual_logs_send_expected_wire_payloads() {
     let server = TestServer::start(2);
-    let client = Auralog::new(
-        AuralogConfig::builder()
+    let client = Auralogs::new(
+        AuralogsConfig::builder()
             .api_key("aura_test")
             .environment("test")
             .endpoint(server.endpoint())
@@ -75,8 +75,8 @@ fn manual_logs_send_expected_wire_payloads() {
 fn global_metadata_supplier_panic_does_not_crash_logging() {
     let _guard = PANIC_TEST_LOCK.lock().unwrap();
     let server = TestServer::start(1);
-    let client = Auralog::new(
-        AuralogConfig::builder()
+    let client = Auralogs::new(
+        AuralogsConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
             .allow_insecure_endpoint(true)
@@ -97,8 +97,8 @@ fn global_metadata_supplier_panic_does_not_crash_logging() {
 #[test]
 fn flush_drains_all_batches() {
     let server = TestServer::start(3);
-    let client = Auralog::new(
-        AuralogConfig::builder()
+    let client = Auralogs::new(
+        AuralogsConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
             .allow_insecure_endpoint(true)
@@ -124,8 +124,8 @@ fn flush_drains_all_batches() {
 #[test]
 fn four_xx_failures_are_not_retried() {
     let server = TestServer::with_statuses(vec![401]);
-    let client = Auralog::new(
-        AuralogConfig::builder()
+    let client = Auralogs::new(
+        AuralogsConfig::builder()
             .api_key("bad_key")
             .endpoint(server.endpoint())
             .allow_insecure_endpoint(true)
@@ -148,8 +148,8 @@ fn four_xx_failures_are_not_retried() {
 #[test]
 fn retryable_failures_stop_after_attempt_limit() {
     let server = TestServer::with_statuses(vec![500, 500]);
-    let client = Auralog::new(
-        AuralogConfig::builder()
+    let client = Auralogs::new(
+        AuralogsConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
             .allow_insecure_endpoint(true)
@@ -170,8 +170,8 @@ fn retryable_failures_stop_after_attempt_limit() {
 #[test]
 fn queue_trims_oldest_entries_under_pressure() {
     let server = TestServer::start(1);
-    let client = Auralog::new(
-        AuralogConfig::builder()
+    let client = Auralogs::new(
+        AuralogsConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
             .allow_insecure_endpoint(true)
@@ -197,8 +197,8 @@ fn queue_trims_oldest_entries_under_pressure() {
 #[test]
 fn runtime_trace_and_global_metadata_can_change() {
     let server = TestServer::start(2);
-    let client = Auralog::new(
-        AuralogConfig::builder()
+    let client = Auralogs::new(
+        AuralogsConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
             .allow_insecure_endpoint(true)
@@ -226,8 +226,8 @@ fn runtime_trace_and_global_metadata_can_change() {
 #[test]
 fn non_object_metadata_is_wrapped() {
     let server = TestServer::start(1);
-    let client = Auralog::new(
-        AuralogConfig::builder()
+    let client = Auralogs::new(
+        AuralogsConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
             .allow_insecure_endpoint(true)
@@ -247,8 +247,8 @@ fn non_object_metadata_is_wrapped() {
 fn panic_hook_emits_fatal_entry() {
     let _guard = PANIC_TEST_LOCK.lock().unwrap();
     let server = TestServer::start(1);
-    let client = Auralog::new(
-        AuralogConfig::builder()
+    let client = Auralogs::new(
+        AuralogsConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
             .allow_insecure_endpoint(true)
@@ -272,8 +272,8 @@ fn panic_hook_emits_fatal_entry() {
 #[test]
 fn tracing_layer_includes_span_context() {
     let server = TestServer::start(1);
-    let client = Auralog::new(
-        AuralogConfig::builder()
+    let client = Auralogs::new(
+        AuralogsConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
             .allow_insecure_endpoint(true)
@@ -282,7 +282,7 @@ fn tracing_layer_includes_span_context() {
     )
     .unwrap();
     let subscriber =
-        tracing_subscriber::registry().with(auralog::AuralogLayer::new(client.clone()));
+        tracing_subscriber::registry().with(auralogs::AuralogsLayer::new(client.clone()));
 
     tracing::subscriber::with_default(subscriber, || {
         let span = tracing::info_span!("request", request_id = "req_1");
@@ -306,7 +306,7 @@ fn log_level_serializes_lowercase() {
 
 #[test]
 fn config_rejects_plaintext_endpoint_by_default() {
-    let result = AuralogConfig::builder()
+    let result = AuralogsConfig::builder()
         .api_key("k")
         .endpoint("http://insecure")
         .build();
@@ -318,7 +318,7 @@ fn config_rejects_plaintext_endpoint_by_default() {
 
 #[test]
 fn config_allows_plaintext_endpoint_when_opted_in() {
-    let result = AuralogConfig::builder()
+    let result = AuralogsConfig::builder()
         .api_key("k")
         .endpoint("http://insecure")
         .allow_insecure_endpoint(true)
@@ -328,7 +328,7 @@ fn config_allows_plaintext_endpoint_when_opted_in() {
 
 #[test]
 fn config_accepts_https_endpoint_without_opt_in() {
-    let result = AuralogConfig::builder()
+    let result = AuralogsConfig::builder()
         .api_key("k")
         .endpoint("https://ingest.example.com")
         .build();
@@ -344,7 +344,7 @@ fn config_accepts_uppercase_https_scheme() {
         "Https://ingest.example.com",
         "hTtPs://ingest.example.com",
     ] {
-        let result = AuralogConfig::builder()
+        let result = AuralogsConfig::builder()
             .api_key("k")
             .endpoint(endpoint)
             .build();
@@ -417,8 +417,8 @@ fn redirects_are_not_followed() {
         301,
         Some(format!("Location: http://{trap_addr}/elsewhere")),
     )]);
-    let client = Auralog::new(
-        AuralogConfig::builder()
+    let client = Auralogs::new(
+        AuralogsConfig::builder()
             .api_key("aura_test")
             .endpoint(server.endpoint())
             .allow_insecure_endpoint(true)

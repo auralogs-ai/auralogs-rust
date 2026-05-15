@@ -1,9 +1,9 @@
-use auralog::{Auralog, AuralogConfig};
+use auralogs::{Auralogs, AuralogsConfig};
 use serde_json::json;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = Auralog::init(
-        AuralogConfig::builder()
+    let client = Auralogs::init(
+        AuralogsConfig::builder()
             .api_key(std::env::var("AURALOG_API_KEY").unwrap_or_else(|_| "aura_your_key".into()))
             .environment("production")
             .build()?,

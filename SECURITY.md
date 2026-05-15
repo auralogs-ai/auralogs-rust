@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you think you've found a security issue in the Auralog Rust SDK, please **do not open a public issue**.
+If you think you've found a security issue in the Auralogs Rust SDK, please **do not open a public issue**.
 
 Instead, email [james.c.e.thomas@gmail.com](mailto:james.c.e.thomas@gmail.com) with:
 
@@ -14,6 +14,6 @@ You'll get an acknowledgement within a few business days. Once triaged, we'll co
 
 ## Scope
 
-This policy covers the `auralog` Rust crate published from this repository.
+This policy covers the `auralogs` Rust crate published from this repository.
 
-For issues with the Auralog service itself, please include that in your report.
+For issues with the Auralogs service itself, please include that in your report.

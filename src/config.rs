@@ -1,9 +1,9 @@
-use crate::error::{AuralogError, Result};
+use crate::error::{AuralogsError, Result};
 use crate::global::GlobalMetadata;
 use crate::transport::TransportConfig;
 use std::time::Duration;
 
-const DEFAULT_ENDPOINT: &str = "https://ingest.auralog.ai";
+const DEFAULT_ENDPOINT: &str = "https://ingest.auralogs.ai";
 const DEFAULT_ENVIRONMENT: &str = "production";
 const DEFAULT_FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 const DEFAULT_MAX_BATCH_SIZE: usize = 50;
@@ -15,7 +15,7 @@ const DEFAULT_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
-pub struct AuralogConfig {
+pub struct AuralogsConfig {
     pub(crate) api_key: String,
     pub(crate) environment: String,
     pub(crate) endpoint: String,
@@ -33,9 +33,9 @@ pub struct AuralogConfig {
     pub(crate) capture_panics: bool,
 }
 
-impl AuralogConfig {
-    pub fn builder() -> AuralogConfigBuilder {
-        AuralogConfigBuilder::default()
+impl AuralogsConfig {
+    pub fn builder() -> AuralogsConfigBuilder {
+        AuralogsConfigBuilder::default()
     }
 
     pub(crate) fn transport_config(&self) -> TransportConfig {
@@ -54,7 +54,7 @@ impl AuralogConfig {
 }
 
 #[derive(Debug, Default)]
-pub struct AuralogConfigBuilder {
+pub struct AuralogsConfigBuilder {
     api_key: Option<String>,
     environment: Option<String>,
     endpoint: Option<String>,
@@ -73,7 +73,7 @@ pub struct AuralogConfigBuilder {
     capture_panics: Option<bool>,
 }
 
-impl AuralogConfigBuilder {
+impl AuralogsConfigBuilder {
     pub fn api_key(mut self, value: impl Into<String>) -> Self {
         self.api_key = Some(value.into());
         self
@@ -141,7 +141,7 @@ impl AuralogConfigBuilder {
 
     /// Allow plaintext (non-HTTPS) endpoints. Defaults to `false`.
     ///
-    /// By default, [`AuralogConfigBuilder::build`] rejects endpoints whose
+    /// By default, [`AuralogsConfigBuilder::build`] rejects endpoints whose
     /// scheme is not `https://` so that a misconfigured endpoint cannot
     /// silently downgrade every POST to plaintext. Set this to `true`
     /// explicitly when you need to talk to a local development server or
@@ -157,24 +157,24 @@ impl AuralogConfigBuilder {
         self
     }
 
-    pub fn build(self) -> Result<AuralogConfig> {
-        let api_key = self.api_key.ok_or(AuralogError::MissingApiKey)?;
+    pub fn build(self) -> Result<AuralogsConfig> {
+        let api_key = self.api_key.ok_or(AuralogsError::MissingApiKey)?;
         if api_key.trim().is_empty() {
-            return Err(AuralogError::MissingApiKey);
+            return Err(AuralogsError::MissingApiKey);
         }
 
         let environment = self
             .environment
             .unwrap_or_else(|| DEFAULT_ENVIRONMENT.to_string());
         if environment.trim().is_empty() {
-            return Err(AuralogError::MissingEnvironment);
+            return Err(AuralogsError::MissingEnvironment);
         }
 
         let endpoint = self
             .endpoint
             .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
         if endpoint.trim().is_empty() {
-            return Err(AuralogError::MissingEndpoint);
+            return Err(AuralogsError::MissingEndpoint);
         }
 
         let allow_insecure_endpoint = self.allow_insecure_endpoint.unwrap_or(false);
@@ -190,7 +190,7 @@ impl AuralogConfigBuilder {
             .map(|(scheme, _rest)| scheme.eq_ignore_ascii_case("https"))
             .unwrap_or(false);
         if !allow_insecure_endpoint && !scheme_is_https {
-            return Err(AuralogError::InvalidConfig(
+            return Err(AuralogsError::InvalidConfig(
                 "endpoint must use https://; pass allow_insecure_endpoint(true) to opt in to \
                  plaintext"
                     .to_string(),
@@ -216,27 +216,27 @@ impl AuralogConfigBuilder {
         validate_duration("http_timeout", http_timeout)?;
         validate_duration("shutdown_timeout", shutdown_timeout)?;
         if max_batch_size == 0 {
-            return Err(AuralogError::InvalidConfig(
+            return Err(AuralogsError::InvalidConfig(
                 "max_batch_size must be greater than zero".to_string(),
             ));
         }
         if max_queue_size == 0 {
-            return Err(AuralogError::InvalidConfig(
+            return Err(AuralogsError::InvalidConfig(
                 "max_queue_size must be greater than zero".to_string(),
             ));
         }
         if max_retry_attempts == 0 {
-            return Err(AuralogError::InvalidConfig(
+            return Err(AuralogsError::InvalidConfig(
                 "max_retry_attempts must be greater than zero".to_string(),
             ));
         }
         if retry_max_delay < retry_initial_delay {
-            return Err(AuralogError::InvalidConfig(
+            return Err(AuralogsError::InvalidConfig(
                 "retry_max_delay must be greater than or equal to retry_initial_delay".to_string(),
             ));
         }
 
-        Ok(AuralogConfig {
+        Ok(AuralogsConfig {
             api_key,
             environment,
             endpoint: endpoint.trim_end_matches('/').to_string(),
@@ -258,7 +258,7 @@ impl AuralogConfigBuilder {
 
 fn validate_duration(name: &str, value: Duration) -> Result<()> {
     if value.is_zero() {
-        return Err(AuralogError::InvalidConfig(format!(
+        return Err(AuralogsError::InvalidConfig(format!(
             "{name} must be greater than zero"
         )));
     }

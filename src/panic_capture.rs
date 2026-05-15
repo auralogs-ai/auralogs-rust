@@ -1,9 +1,9 @@
-use crate::{Auralog, LogLevel};
+use crate::{Auralogs, LogLevel};
 use serde_json::json;
 use std::panic;
 use std::sync::Arc;
 
-pub(crate) fn install(client: Arc<Auralog>) {
+pub(crate) fn install(client: Arc<Auralogs>) {
     let previous = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
         let payload = info
