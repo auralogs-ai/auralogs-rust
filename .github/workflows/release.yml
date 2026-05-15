@@ -22,7 +22,11 @@ jobs:
 
       - run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - run: cargo test --all-features
+      # Tests that install global panic hooks (panic_hook_emits_fatal_entry,
+      # global_metadata_supplier_panic_does_not_crash_logging) collide when
+      # run in parallel because std::panic::set_hook is global state. Force
+      # single-threaded execution to keep them deterministic.
+      - run: cargo test --all-features -- --test-threads=1
 
       - run: cargo publish
         env:
