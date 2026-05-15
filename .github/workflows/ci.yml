@@ -16,7 +16,7 @@ jobs:
         toolchain: [stable, "1.86.0"]
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@${{ matrix.toolchain }}
         with:
