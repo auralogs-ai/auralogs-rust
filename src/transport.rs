@@ -308,7 +308,10 @@ impl Inner {
     }
 
     fn warn_once(&self, message: &str) {
-        let mut warned = self.warned_failure.lock().expect("auralogs warned poisoned");
+        let mut warned = self
+            .warned_failure
+            .lock()
+            .expect("auralogs warned poisoned");
         if !*warned {
             eprintln!("{message}");
             *warned = true;
